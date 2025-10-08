@@ -164,12 +164,12 @@ jobs:
       run: |
         echo "🚀 Forcing ArgoCD sync after deployment update..."
         
-        # Wait a bit for git push to complete
-        sleep 10
+        # Wait for git push to complete
+        sleep 15
         
-        # Try to trigger ArgoCD webhook (if accessible)
-        echo "📡 Attempting webhook trigger..."
-        curl -X POST "http://argocd-webhook.local:30081/api/webhook" \
+        # Method 1: Try ArgoCD webhook trigger
+        echo "📡 Attempting ArgoCD webhook trigger..."
+        curl -X POST "http://argocd-webhook.local:30082/api/webhook" \
           -H "Content-Type: application/json" \
           -d '{
             "repository": {
@@ -180,9 +180,20 @@ jobs:
               "id": "${{ github.sha }}",
               "message": "chore: update image to latest [skip ci]"
             }
-          }' --connect-timeout 10 --max-time 30 || echo "⚠️ Webhook not accessible, relying on auto-sync"
+          }' --connect-timeout 10 --max-time 30 || echo "⚠️ Webhook not accessible"
+        
+        # Method 2: Force refresh ArgoCD application via kubectl
+        echo "🔄 Force refreshing ArgoCD application..."
+        kubectl patch application django-simple-app -n argocd-new \
+          --type merge \
+          --patch '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"syncStrategy":{"force":true}}}}' || echo "⚠️ kubectl patch failed"
+        
+        # Method 3: Add annotation to force refresh
+        echo "🏷️ Adding refresh annotation..."
+        kubectl annotate application django-simple-app -n argocd-new \
+          argocd.argoproj.io/refresh=hard --overwrite || echo "⚠️ Annotation failed"
         
         echo "✅ ArgoCD sync process initiated!"
         echo "⏰ Timestamp updated: $(date)"
-        echo "🔄 ArgoCD application 'django-simple-app' should sync automatically within 3 minutes"
+        echo "🔄 ArgoCD application 'django-simple-app' should sync automatically within 2 minutes"
         echo "📊 Monitor with: kubectl get applications -n argocd-new"
