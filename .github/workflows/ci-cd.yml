@@ -124,13 +124,12 @@ jobs:
         TIMESTAMP=$(date +%s)
         echo "Adding timestamp: $TIMESTAMP"
         
-        # Kiểm tra xem có annotations section không
-        if grep -q "annotations:" k8s/deployment.yaml; then
-          sed -i "/annotations:/a\        timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
-        else
-          # Nếu không có annotations, thêm vào metadata
-          sed -i "/metadata:/a\  annotations:\n    timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
-        fi
+        # Thay thế timestamp cũ bằng timestamp mới
+        sed -i "s/timestamp: \".*\"/timestamp: \"$TIMESTAMP\"/g" k8s/deployment.yaml
+        
+        # Kiểm tra timestamp đã được cập nhật
+        echo "Updated timestamp:"
+        grep "timestamp:" k8s/deployment.yaml
         
     - name: Commit and push changes
       run: |
@@ -161,8 +160,29 @@ jobs:
         # Push changes
         git push origin main
         
-    - name: ArgoCD Auto-Sync
+    - name: Force ArgoCD Sync
       run: |
-        echo "✅ ArgoCD will automatically sync when Repo B is updated..."
-        echo "🚀 No manual trigger needed - ArgoCD auto-sync is enabled!"
+        echo "🚀 Forcing ArgoCD sync after deployment update..."
+        
+        # Wait a bit for git push to complete
+        sleep 10
+        
+        # Try to trigger ArgoCD webhook (if accessible)
+        echo "📡 Attempting webhook trigger..."
+        curl -X POST "http://argocd-webhook.local:30081/api/webhook" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "repository": {
+              "full_name": "QuanMBL4255142/Repository_B_CI_CD_FPT_repoB_Devops"
+            },
+            "ref": "refs/heads/main",
+            "head_commit": {
+              "id": "${{ github.sha }}",
+              "message": "chore: update image to latest [skip ci]"
+            }
+          }' --connect-timeout 10 --max-time 30 || echo "⚠️ Webhook not accessible, relying on auto-sync"
+        
+        echo "✅ ArgoCD sync process initiated!"
         echo "⏰ Timestamp updated: $(date)"
+        echo "🔄 ArgoCD application 'django-simple-app' should sync automatically within 3 minutes"
+        echo "📊 Monitor with: kubectl get applications -n argocd-new"
