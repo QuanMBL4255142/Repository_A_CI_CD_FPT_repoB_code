@@ -193,7 +193,13 @@ jobs:
         kubectl annotate application django-simple-app -n argocd-new \
           argocd.argoproj.io/refresh=hard --overwrite || echo "⚠️ Annotation failed"
         
+        # Method 4: Call ArgoCD webhook to trigger sync
+        echo "🔗 Calling ArgoCD webhook..."
+        curl -X POST http://argocd-webhook.django-api.svc.cluster.local:8080/api/webhook \
+          -H "Content-Type: application/json" \
+          -d '{"repository": {"name": "Repository_A_CI_CD_FPT_repoB_code"}}' || echo "⚠️ Webhook call failed"
+        
         echo "✅ ArgoCD sync process initiated!"
         echo "⏰ Timestamp updated: $(date)"
-        echo "🔄 ArgoCD application 'django-simple-app' should sync automatically within 2 minutes"
+        echo "🔄 ArgoCD application 'django-api-app' should sync automatically within 2 minutes"
         echo "📊 Monitor with: kubectl get applications -n argocd-new"
