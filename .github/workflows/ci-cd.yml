@@ -120,15 +120,16 @@ jobs:
         echo "After update:"
         grep "image:" k8s/deployment.yaml
         
-        # Thêm timestamp annotation để force restart pods
+        # Thêm timestamp annotation vào pod template để force restart pods
         TIMESTAMP=$(date +%s)
-        echo "Adding timestamp: $TIMESTAMP"
+        echo "Adding timestamp to pod template: $TIMESTAMP"
         
-        # Thay thế timestamp cũ bằng timestamp mới
-        sed -i "s/timestamp: \".*\"/timestamp: \"$TIMESTAMP\"/g" k8s/deployment.yaml
+        # Update timestamp trong pod template annotations
+        # Tìm dòng có "timestamp:" và replace bằng timestamp mới
+        sed -i "/^        timestamp:/c\        timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
         
         # Kiểm tra timestamp đã được cập nhật
-        echo "Updated timestamp:"
+        echo "Updated timestamp in pod template:"
         grep "timestamp:" k8s/deployment.yaml
         
     - name: Commit and push changes

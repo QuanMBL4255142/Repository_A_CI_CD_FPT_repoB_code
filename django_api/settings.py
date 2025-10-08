@@ -61,10 +61,11 @@ TEMPLATES = [
 WSGI_APPLICATION = 'django_api.wsgi.application'
 
 # Database
+# Sử dụng persistent storage để giữ data khi pod restart
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': '/app/data/db.sqlite3',
     }
 }
 
