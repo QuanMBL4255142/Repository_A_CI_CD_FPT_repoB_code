@@ -16,5 +16,5 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 def health_check(request):
     return JsonResponse({
         'status': 'healthy',
-        'message': 'Django API is running!'
+        'message': 'Django API is running! Version 2.0 - Updated via CI/CD!'
     })
