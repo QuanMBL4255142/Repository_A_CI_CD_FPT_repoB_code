@@ -100,26 +100,68 @@ jobs:
     - name: Update image tag
       run: |
         cd manifests
-        # Cập nhật tag image trong deployment.yaml - dùng latest để đảm bảo pull được image mới
-        # Vì workflow tạo cả latest và main-{SHA} tags, dùng latest để đảm bảo image tồn tại
+        echo "Current directory: $(pwd)"
+        echo "Files in manifests:"
+        ls -la
+        
+        # Kiểm tra file deployment.yaml có tồn tại không
+        if [ ! -f "k8s/deployment.yaml" ]; then
+          echo "Error: k8s/deployment.yaml not found!"
+          exit 1
+        fi
+        
+        echo "Before update:"
+        grep "image:" k8s/deployment.yaml
+        
+        # Cập nhật tag image trong deployment.yaml
         sed -i "s|image: ghcr.io/.*/repository_a_ci_cd_fpt_repob_code:.*|image: ghcr.io/quanmbl4255142/repository_a_ci_cd_fpt_repob_code:latest|g" k8s/deployment.yaml
+        
+        echo "After update:"
+        grep "image:" k8s/deployment.yaml
+        
         # Thêm timestamp annotation để force restart pods
         TIMESTAMP=$(date +%s)
-        sed -i "/annotations:/a\        timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
+        echo "Adding timestamp: $TIMESTAMP"
+        
+        # Kiểm tra xem có annotations section không
+        if grep -q "annotations:" k8s/deployment.yaml; then
+          sed -i "/annotations:/a\        timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
+        else
+          # Nếu không có annotations, thêm vào metadata
+          sed -i "/metadata:/a\  annotations:\n    timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
+        fi
         
     - name: Commit and push changes
       run: |
         cd manifests
+        echo "Current directory: $(pwd)"
+        
+        # Configure git
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add .
-        git commit -m "Update repository_a_ci_cd_fpt_repob_code image to ${{ github.sha }}" || exit 0
-        # Sử dụng GITHUB_TOKEN với quyền đầy đủ
+        
+        # Check git status
+        echo "Git status:"
+        git status
+        
+        # Add changes
+        git add k8s/deployment.yaml
+        
+        # Check what's staged
+        echo "Staged changes:"
+        git diff --cached
+        
+        # Commit changes
+        git commit -m "chore: update image to latest [skip ci]" || echo "No changes to commit"
+        
+        # Set remote URL with token
         git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/QuanMBL4255142/Repository_B_CI_CD_FPT_repoB_Devops.git
-        git push
+        
+        # Push changes
+        git push origin main
         
     - name: ArgoCD Auto-Sync
       run: |
-        echo "ArgoCD will automatically sync when Repo B is updated..."
-        echo "No manual trigger needed - ArgoCD auto-sync is enabled!"
-        echo "Timestamp updated: $(date)"
+        echo "✅ ArgoCD will automatically sync when Repo B is updated..."
+        echo "🚀 No manual trigger needed - ArgoCD auto-sync is enabled!"
+        echo "⏰ Timestamp updated: $(date)"
