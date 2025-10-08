@@ -1,0 +1,106 @@
+name: CI/CD with Live Manifest Update
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Set up job
+      run: echo "Starting CI/CD pipeline with Live Manifest update"
+
+    - name: Checkout application repo
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Checkout manifests repo
+      if: github.ref == 'refs/heads/main'
+      uses: actions/checkout@v4
+      with:
+        repository: QuanMBL4255142/Repository_B_CI_CD_FPT_repoB_Devops
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: manifests
+
+    - name: Update image tag
+      if: github.ref == 'refs/heads/main'
+      run: |
+        # Get the latest image tag (usually the SHA-based tag)
+        IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep -o 'latest' | head -1)
+        if [ -z "$IMAGE_TAG" ]; then
+          IMAGE_TAG="latest"
+        fi
+        
+        # Update deployment.yaml with new image tag
+        sed -i "s|image: ghcr.io/quanmbl4255142/repository_a_ci_cd_fpt_repob_code:.*|image: ghcr.io/quanmbl4255142/repository_a_ci_cd_fpt_repob_code:$IMAGE_TAG|g" manifests/k8s/deployment.yaml
+        
+        echo "Updated deployment.yaml with image tag: $IMAGE_TAG"
+        cat manifests/k8s/deployment.yaml | grep "image:"
+
+    - name: Commit and push changes
+      if: github.ref == 'refs/heads/main'
+      run: |
+        cd manifests
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add k8s/deployment.yaml
+        git commit -m "chore: update image to ${{ steps.meta.outputs.tags }} [skip ci]"
+        git push
+
+    - name: ArgoCD Auto-Sync
+      if: github.ref == 'refs/heads/main'
+      run: |
+        echo "ArgoCD will automatically sync the updated manifest"
+        echo "Image updated to: ${{ steps.meta.outputs.tags }}"
+        echo "Deployment should be updated via ArgoCD auto-sync"
+
+    - name: Post Checkout manifests repo
+      if: github.ref == 'refs/heads/main'
+      run: |
+        echo "Manifest update completed successfully"
+        echo "ArgoCD will detect the changes and sync automatically"
+
+    - name: Complete job
+      run: |
+        echo "CI/CD pipeline with Live Manifest update completed"
+        echo "Image: ${{ steps.meta.outputs.tags }}"
+        echo "Status: Deployment will be updated via ArgoCD auto-sync"
