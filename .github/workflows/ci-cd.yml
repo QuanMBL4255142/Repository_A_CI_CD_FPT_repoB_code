@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: QuanMBL4255142/Repository_A_CI_CD_FPT_repoA_code
 
 jobs:
   test:
@@ -46,6 +46,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
       
     steps:
     - name: Checkout code
