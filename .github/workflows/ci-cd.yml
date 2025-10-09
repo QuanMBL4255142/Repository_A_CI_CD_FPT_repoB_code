@@ -179,12 +179,8 @@ jobs:
           exit 1
         fi
         
-        # Tạo kubeconfig từ GitHub secrets với error handling
-        echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config 2>/dev/null || {
-          echo "❌ Failed to decode KUBE_CONFIG_DATA secret"
-          echo "⚠️ Trying alternative approach..."
-          echo "${{ secrets.KUBE_CONFIG_DATA }}" > ~/.kube/config
-        }
+        # Tạo kubeconfig từ GitHub secrets - thử raw content trước
+        echo "${{ secrets.KUBE_CONFIG_DATA }}" > ~/.kube/config
         
         # Verify kubectl connection
         echo "🔍 Verifying kubectl connection..."
