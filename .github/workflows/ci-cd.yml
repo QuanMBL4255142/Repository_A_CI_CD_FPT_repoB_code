@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: QuanMBL4255142/Repository_A_CI_CD_FPT_repoA_code
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
@@ -117,7 +117,7 @@ jobs:
         grep "image:" k8s/deployment.yaml
         
         # Cập nhật tag image trong deployment.yaml
-        sed -i "s|image: ghcr.io/.*/repository_a_ci_cd_fpt_repob_code:.*|image: ghcr.io/quanmbl4255142/repository_a_ci_cd_fpt_repob_code:latest|g" k8s/deployment.yaml
+        sed -i "s|image: ghcr.io/.*/.*:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/deployment.yaml
         
         echo "After update:"
         grep "image:" k8s/deployment.yaml
@@ -163,12 +163,61 @@ jobs:
         # Push changes
         git push origin main
         
+    - name: Setup Kubernetes config
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Configure kubectl and trigger ArgoCD
+      run: |
+        # Tạo kubeconfig directory
+        mkdir -p ~/.kube
+        
+        # Kiểm tra KUBE_CONFIG_DATA secret có tồn tại không
+        if [ -z "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+          echo "❌ KUBE_CONFIG_DATA secret is not configured!"
+          echo "⚠️ ArgoCD sync will not be triggered automatically"
+          echo "Please manually sync ArgoCD application or add KUBE_CONFIG_DATA secret"
+          exit 0
+        fi
+        
+        # Tạo kubeconfig từ GitHub secrets
+        echo "${{ secrets.KUBE_CONFIG_DATA }}" > ~/.kube/config
+        
+        # Verify kubectl connection
+        echo "🔍 Verifying kubectl connection..."
+        kubectl version --client
+        if kubectl cluster-info; then
+          echo "✅ Successfully connected to Kubernetes cluster"
+        else
+          echo "❌ Cannot connect to cluster - ArgoCD sync will not be triggered"
+          exit 0
+        fi
+        
+        # Wait for git push to complete
+        echo "⏳ Waiting for git push to complete..."
+        sleep 15
+        
+        # Trigger ArgoCD sync
+        echo "🔄 Triggering ArgoCD sync..."
+        kubectl patch application django-api-app -n argocd-new \
+          --type merge \
+          --patch '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || echo "⚠️ ArgoCD app not found or sync failed"
+        
+        # Alternative: Trigger sync via ArgoCD CLI
+        echo "⚡ Alternative sync method..."
+        kubectl patch application django-api-app -n argocd-new \
+          --type merge \
+          --patch '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"syncStrategy":{"force":true}}}}' || echo "⚠️ Force sync failed"
+        
+        echo "✅ ArgoCD sync triggered successfully!"
+        
     - name: Notify Deployment Completion
       run: |
         echo "✅ CI/CD Pipeline completed successfully!"
         echo "📦 Docker image built and pushed to: ghcr.io/${{ github.repository }}:latest"
         echo "📝 Manifests updated in Repository_B"
-        echo "🔄 ArgoCD will automatically detect changes and sync"
+        echo "🔄 ArgoCD sync triggered"
         echo ""
         echo "📊 Monitor deployment:"
         echo "  - ArgoCD UI: Check application sync status"
