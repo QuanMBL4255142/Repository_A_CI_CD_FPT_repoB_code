@@ -162,32 +162,88 @@ jobs:
         # Push changes
         git push origin main
         
+    - name: Setup Kubernetes config
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Configure kubectl
+      run: |
+        # Tạo kubeconfig directory
+        mkdir -p ~/.kube
+        
+        # Kiểm tra KUBE_CONFIG_DATA secret có tồn tại không
+        if [ -z "${{ secrets.KUBE_CONFIG_DATA }}" ]; then
+          echo "❌ KUBE_CONFIG_DATA secret is not configured!"
+          echo "Please add KUBE_CONFIG_DATA secret to repository settings."
+          exit 1
+        fi
+        
+        # Tạo kubeconfig từ GitHub secrets
+        echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
+        
+        # Verify kubectl connection
+        echo "🔍 Verifying kubectl connection..."
+        kubectl version --client
+        if kubectl cluster-info; then
+          echo "✅ Successfully connected to Kubernetes cluster"
+        else
+          echo "❌ Cannot connect to cluster - check KUBE_CONFIG_DATA secret"
+          exit 1
+        fi
+        
     - name: Force ArgoCD Sync and Delete Old Pods
       run: |
         echo "🚀 Forcing ArgoCD sync and deleting old pods..."
         
         # Wait for git push to complete
+        echo "⏳ Waiting for git push to complete..."
         sleep 15
         
-        # Method 1: Force delete old pods first
-        echo "🗑️ Force deleting old pods..."
-        kubectl delete pods -l app=django-api -n django-api --force --grace-period=0 || echo "⚠️ No old pods to delete"
+        # Verify cluster connection before proceeding
+        echo "🔍 Verifying cluster connection..."
+        if ! kubectl cluster-info > /dev/null 2>&1; then
+          echo "❌ Cannot connect to Kubernetes cluster. Skipping ArgoCD operations."
+          echo "Please check KUBE_CONFIG_DATA secret configuration."
+          exit 1
+        fi
+        echo "✅ Cluster connection verified"
         
-        # Method 2: Force refresh ArgoCD application
-        echo "🔄 Force refreshing ArgoCD application..."
-        kubectl patch application django-api-app -n argocd-new \
-          --type merge \
-          --patch '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || echo "⚠️ kubectl patch failed"
-        
-        # Method 3: Trigger sync with force strategy
-        echo "⚡ Triggering force sync..."
-        kubectl patch application django-api-app -n argocd-new \
-          --type merge \
-          --patch '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"syncStrategy":{"force":true}}}}' || echo "⚠️ Force sync failed"
+        # Check if ArgoCD application exists
+        echo "🔍 Checking ArgoCD application..."
+        if ! kubectl get application django-api-app -n argocd-new > /dev/null 2>&1; then
+          echo "⚠️ ArgoCD application 'django-api-app' not found in namespace 'argocd-new'"
+          echo "Available applications:"
+          kubectl get applications -A | grep django || echo "No django applications found"
+          echo "⚠️ Skipping ArgoCD operations, will only restart deployment"
+        else
+          echo "✅ ArgoCD application found"
+          
+          # Method 1: Force delete old pods first
+          echo "🗑️ Force deleting old pods..."
+          kubectl delete pods -l app=django-api -n django-api --force --grace-period=0 || echo "⚠️ No old pods to delete"
+          
+          # Method 2: Force refresh ArgoCD application
+          echo "🔄 Force refreshing ArgoCD application..."
+          kubectl patch application django-api-app -n argocd-new \
+            --type merge \
+            --patch '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || echo "⚠️ kubectl patch failed"
+          
+          # Method 3: Trigger sync with force strategy
+          echo "⚡ Triggering force sync..."
+          kubectl patch application django-api-app -n argocd-new \
+            --type merge \
+            --patch '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"syncStrategy":{"force":true}}}}' || echo "⚠️ Force sync failed"
+        fi
         
         # Method 4: Restart deployment to force new pods
         echo "🔄 Restarting deployment..."
-        kubectl rollout restart deployment django-api -n django-api || echo "⚠️ Deployment restart failed"
+        if kubectl rollout restart deployment django-api -n django-api; then
+          echo "✅ Deployment restart initiated"
+        else
+          echo "⚠️ Deployment restart failed - deployment may not exist"
+          exit 1
+        fi
         
         # Method 5: Wait and verify pods
         echo "⏳ Waiting for new pods to be ready..."
