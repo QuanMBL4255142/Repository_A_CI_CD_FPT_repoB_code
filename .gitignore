@@ -58,3 +58,8 @@ htmlcov/
 
 # Flake8
 .flake8
+
+# Kubernetes config (should not be committed)
+*kubeconfig*
+*.kubeconfig
+simple-kubeconfig.yaml
