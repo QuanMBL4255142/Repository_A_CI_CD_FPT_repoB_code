@@ -87,7 +87,7 @@ jobs:
   update-manifests:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     permissions:
       contents: write
     
@@ -95,7 +95,7 @@ jobs:
     - name: Checkout manifests repo
       uses: actions/checkout@v4
       with:
-        repository: QuanMBL4255142/Repository_B_CI_CD_FPT_repoB_Devops
+        repository: quanmbl4255142/repository_b_ci_cd_fpt_repob_devops
         # lõi nằm setting secrets and variable/ action
         token: ${{ secrets.PAT_TOKEN }}
         path: manifests
@@ -107,20 +107,47 @@ jobs:
         echo "Files in manifests:"
         ls -la
         
+        # Xác định environment và path tương ứng
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        if [ "$BRANCH_NAME" == "main" ]; then
+          DEPLOY_PATH="k8s"
+          ENVIRONMENT="production"
+        else
+          DEPLOY_PATH="k8s-staging"
+          ENVIRONMENT="staging"
+        fi
+        
+        echo "Branch: $BRANCH_NAME"
+        echo "Environment: $ENVIRONMENT"
+        echo "Deploy path: $DEPLOY_PATH"
+        
         # Kiểm tra file deployment.yaml có tồn tại không
-        if [ ! -f "k8s/deployment.yaml" ]; then
-          echo "Error: k8s/deployment.yaml not found!"
+        if [ ! -f "${DEPLOY_PATH}/deployment.yaml" ]; then
+          echo "Error: ${DEPLOY_PATH}/deployment.yaml not found!"
           exit 1
         fi
         
         echo "Before update:"
-        grep "image:" k8s/deployment.yaml
+        grep "image:" ${DEPLOY_PATH}/deployment.yaml
         
-        # Cập nhật tag image trong deployment.yaml
-        sed -i "s|image: ghcr.io/.*/.*:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/deployment.yaml
+        # Convert IMAGE_NAME sang lowercase để khớp với GHCR
+        IMAGE_NAME_LOWER=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+        
+        # Tạo immutable tag với SHA (7 ký tự đầu)
+        SHA_SHORT="${GITHUB_SHA:0:7}"
+        NEW_TAG="${BRANCH_NAME}-${SHA_SHORT}"
+        NEW_IMAGE="${{ env.REGISTRY }}/${IMAGE_NAME_LOWER}:${NEW_TAG}"
+        
+        echo "Commit SHA: $GITHUB_SHA"
+        echo "Short SHA: $SHA_SHORT"
+        echo "New tag: $NEW_TAG"
+        echo "New image: $NEW_IMAGE"
+        
+        # Replace chính xác image line
+        sed -i "s|image: ghcr.io/[^:]*:[^[:space:]]*|image: ${NEW_IMAGE}|g" ${DEPLOY_PATH}/deployment.yaml
         
         echo "After update:"
-        grep "image:" k8s/deployment.yaml
+        grep "image:" ${DEPLOY_PATH}/deployment.yaml
         
         # Thêm timestamp annotation vào pod template để force restart pods
         TIMESTAMP=$(date +%s)
@@ -128,16 +155,27 @@ jobs:
         
         # Update timestamp trong pod template annotations
         # Tìm dòng có "timestamp:" và replace bằng timestamp mới
-        sed -i "/^        timestamp:/c\        timestamp: \"$TIMESTAMP\"" k8s/deployment.yaml
+        sed -i "/^        timestamp:/c\        timestamp: \"$TIMESTAMP\"" ${DEPLOY_PATH}/deployment.yaml
         
         # Kiểm tra timestamp đã được cập nhật
         echo "Updated timestamp in pod template:"
-        grep "timestamp:" k8s/deployment.yaml
+        grep "timestamp:" ${DEPLOY_PATH}/deployment.yaml
         
     - name: Commit and push changes
       run: |
         cd manifests
         echo "Current directory: $(pwd)"
+        
+        # Xác định environment và path
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        SHA_SHORT="${GITHUB_SHA:0:7}"
+        if [ "$BRANCH_NAME" == "main" ]; then
+          DEPLOY_PATH="k8s"
+          ENVIRONMENT="production"
+        else
+          DEPLOY_PATH="k8s-staging"
+          ENVIRONMENT="staging"
+        fi
         
         # Configure git
         git config --local user.email "action@github.com"
@@ -148,17 +186,17 @@ jobs:
         git status
         
         # Add changes
-        git add k8s/deployment.yaml
+        git add ${DEPLOY_PATH}/deployment.yaml
         
         # Check what's staged
         echo "Staged changes:"
         git diff --cached
         
-        # Commit changes
-        git commit -m "chore: update image to latest [skip ci]" || echo "No changes to commit"
+        # Commit changes with SHA tag and environment
+        git commit -m "chore(${ENVIRONMENT}): update image to ${BRANCH_NAME}-${SHA_SHORT} [skip ci]" || echo "No changes to commit"
         
         # Set remote URL with Personal Access Token
-        git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/QuanMBL4255142/Repository_B_CI_CD_FPT_repoB_Devops.git
+        git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/quanmbl4255142/repository_b_ci_cd_fpt_repob_devops.git
         
         # Push changes
         git push origin main
@@ -194,34 +232,67 @@ jobs:
           exit 0
         fi
         
+        # Xác định ArgoCD app name theo branch
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        if [ "$BRANCH_NAME" == "main" ]; then
+          ARGOCD_APP="django-api-app"
+        else
+          ARGOCD_APP="django-api-staging-app"
+        fi
+        
+        echo "ArgoCD Application: $ARGOCD_APP"
+        
         # Wait for git push to complete
         echo "⏳ Waiting for git push to complete..."
         sleep 15
         
         # Trigger ArgoCD sync
-        echo "🔄 Triggering ArgoCD sync..."
-        kubectl patch application django-api-app -n argocd-new \
+        echo "🔄 Triggering ArgoCD sync for $ARGOCD_APP..."
+        kubectl patch application $ARGOCD_APP -n argocd-new \
           --type merge \
           --patch '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' || echo "⚠️ ArgoCD app not found or sync failed"
         
         # Alternative: Trigger sync via ArgoCD CLI
         echo "⚡ Alternative sync method..."
-        kubectl patch application django-api-app -n argocd-new \
+        kubectl patch application $ARGOCD_APP -n argocd-new \
           --type merge \
           --patch '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"syncStrategy":{"force":true}}}}' || echo "⚠️ Force sync failed"
         
-        echo "✅ ArgoCD sync triggered successfully!"
+        echo "✅ ArgoCD sync triggered successfully for $ARGOCD_APP!"
         
     - name: Notify Deployment Completion
       run: |
+        SHA_SHORT="${GITHUB_SHA:0:7}"
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        IMAGE_TAG="${BRANCH_NAME}-${SHA_SHORT}"
+        
+        if [ "$BRANCH_NAME" == "main" ]; then
+          ENVIRONMENT="🚀 PRODUCTION"
+          NAMESPACE="django-api"
+          APP_NAME="django-api-app"
+        else
+          ENVIRONMENT="🧪 STAGING"
+          NAMESPACE="django-api-staging"
+          APP_NAME="django-api-staging-app"
+        fi
+        
         echo "✅ CI/CD Pipeline completed successfully!"
-        echo "📦 Docker image built and pushed to: ghcr.io/${{ github.repository }}:latest"
+        echo ""
+        echo "🌍 Environment: $ENVIRONMENT"
+        echo "📦 Docker image: ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
+        echo "🔖 Image tag: ${IMAGE_TAG} (immutable)"
         echo "📝 Manifests updated in Repository_B"
         echo "🔄 ArgoCD sync triggered"
         echo ""
         echo "📊 Monitor deployment:"
         echo "  - ArgoCD UI: Check application sync status"
-        echo "  - Kubernetes: kubectl get pods -n django-api"
-        echo "  - Application: Check if new pods are running with latest image"
+        echo "  - Kubernetes: kubectl get pods -n ${NAMESPACE}"
+        echo "  - Application: Check if new pods are running with image tag ${IMAGE_TAG}"
+        echo ""
+        echo "🔍 Debug info:"
+        echo "  - Branch: ${BRANCH_NAME}"
+        echo "  - Commit: ${GITHUB_SHA}"
+        echo "  - Namespace: ${NAMESPACE}"
+        echo "  - ArgoCD App: ${APP_NAME}"
         echo ""
         echo "⏰ Deployment initiated at: $(date)"
