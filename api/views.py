@@ -18,5 +18,5 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 def health_check(request):
     return JsonResponse({
         'status': 'healthy',
-        'message': 'Django API is running! Version 50.0 - ARGOCD IMAGE UPDATER!'
+        'message': 'Django API is running! Version 51.0 - ARGOCD IMAGE UPDATER!'
     })
